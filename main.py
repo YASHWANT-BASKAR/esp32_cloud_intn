@@ -1,34 +1,50 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List
-import numpy as np
-import tensorflow as tf
+import subprocess
+import re
+import time
+import csv
+from datetime import datetime
 
-app = FastAPI()
+# File name for CSV
+csv_filename = "wifi_signal_log.csv"
 
-# Load the trained ML model (.h5 file)
-model = tf.keras.models.load_model("model.h5")
+# Create and open CSV file for writing (add header if new)
+with open(csv_filename, mode="w", newline="") as file:
+    writer = csv.writer(file)
+    writer.writerow(["Timestamp", "Wi-Fi Signal Strength (%)"])  # CSV Header
 
-# Define request structure
-class ComplexData(BaseModel):
-    real: List[float]
-    imag: List[float]
+def log_wifi_signal():
+    print(f"Logging Wi-Fi Signal Strength to {csv_filename}... Press Ctrl+C to stop.\n")
 
-# Function to convert a+ib to magnitude & phase
-def process_complex_data(real, imag):
-    complex_numbers = np.array(real) + 1j * np.array(imag)
-    magnitude = np.abs(complex_numbers)
-    phase = np.angle(complex_numbers)
-    return magnitude.tolist(), phase.tolist()
+    while True:
+        try:
+            # Run the netsh command to get Wi-Fi signal strength
+            result = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True)
+            
+            # Extract the Signal Strength
+            match = re.search(r"Signal\s*:\s*(\d+)%", result.stdout)
+            if match:
+                signal_strength = int(match.group(1))
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                # Save to CSV
+                with open(csv_filename, mode="a", newline="") as file:
+                    writer = csv.writer(file)
+                    writer.writerow([timestamp, signal_strength])
+                
+                # Print real-time output
+                print(f"{timestamp} - Wi-Fi Signal Strength: {signal_strength}%   ", end="\r", flush=True)
+            else:
+                print("Wi-Fi signal strength not found.         ", end="\r", flush=True)
 
-@app.post("/process-data")
-def process_data(data: ComplexData):
-    magnitude, phase = process_complex_data(data.real, data.imag)
+            time.sleep(1)  # Update every 1 second
 
-    # Prepare model input
-    input_features = np.array([magnitude + phase]).reshape(1, -1)
+        except KeyboardInterrupt:
+            print(f"\nLogging stopped. Data saved in {csv_filename}.")
+            break
+        except Exception as e:
+            print(f"Error: {e}")
+            break
 
-    # Get prediction from ML model
-    prediction = model.predict(input_features).tolist()
+# Start logging
+log_wifi_signal()
 
-    return {"prediction": prediction}
